@@ -117,7 +117,7 @@ int main()
 
     int t_count;
 
-    t_count = 1;
+    t_count = 9;
 
     printf("Using %d thread!\n", t_count);
 
@@ -287,7 +287,128 @@ int main()
 
         printf("Blur applied!\n");
     }
-    else if(t_count = 12)
+    else if(t_count == 9)
+    {
+        // create arguments for threads
+        PIXELTHREADARGS args[t_count];
+
+        int divide = height / 3;
+        int dividex2 = divide * 2;
+        printf("%d\n", divide);
+        printf("%d\n", dividex2);
+
+        args[0].height = height;
+        args[0].width = width;
+        args[0].temp = tempR;
+        args[0].startW = 0;
+        args[0].startH = 0;
+        args[0].endW = width;
+        args[0].endH = divide;
+
+        args[1].height = height;
+        args[1].width = width;
+        args[1].temp = tempG;
+        args[1].startW = 0;
+        args[1].startH = 0;
+        args[1].endW = width;
+        args[1].endH = divide;
+
+        args[2].height = height;
+        args[2].width = width;
+        args[2].temp = tempB;
+        args[2].startW = 0;
+        args[2].startH = 0;
+        args[2].endW = width;
+        args[2].endH = divide;
+
+        args[3].height = height;
+        args[3].width = width;
+        args[3].temp = tempR;
+        args[3].startW = 0;
+        args[3].startH = divide;
+        args[3].endW = width;
+        args[3].endH = dividex2;
+
+        args[4].height = height;
+        args[4].width = width;
+        args[4].temp = tempG;
+        args[4].startW = 0;
+        args[4].startH = divide;
+        args[4].endW = width;
+        args[4].endH = dividex2;
+
+        args[5].height = height;
+        args[5].width = width;
+        args[5].temp = tempB;
+        args[5].startW = 0;
+        args[5].startH = divide;
+        args[5].endW = width;
+        args[5].endH = dividex2;
+
+        args[6].height = height;
+        args[6].width = width;
+        args[6].temp = tempR;
+        args[6].startW = 0;
+        args[6].startH = dividex2;
+        args[6].endW = width;
+        args[6].endH = height;
+
+        args[7].height = height;
+        args[7].width = width;
+        args[7].temp = tempG;
+        args[7].startW = 0;
+        args[7].startH = dividex2;
+        args[7].endW = width;
+        args[7].endH = height;
+
+        args[8].height = height;
+        args[8].width = width;
+        args[8].temp = tempB;
+        args[8].startW = 0;
+        args[8].startH = dividex2;
+        args[8].endW = width;
+        args[8].endH = height;
+
+        struct timeval  tv1, tv2;
+
+        pthread_t tid[t_count];
+
+        //take start time
+        gettimeofday(&tv1, NULL);
+
+        // create threads
+        for(int t = 0; t < t_count; t++)
+        {
+            (void) pthread_create(&tid[t], NULL, blurThreadPixel, (void *) &args[t]);
+        }
+
+        // join threads
+        for(int t = 0; t < t_count; t++)
+        {
+            (void) pthread_join(tid[0], NULL);
+        }
+
+        //take end time
+        gettimeofday(&tv2,NULL);
+
+        printf ("Elapsed time = %f seconds\n",
+            (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 +
+            (double) (tv2.tv_sec - tv1.tv_sec));
+
+        //merge R,G,B back to image
+        for (int i = 0; i < height; i++)
+        {
+            for (int j = 0; j < width; j++)
+            {
+                image[i][j].rgbtRed = tempR[i][j];
+                image[i][j].rgbtGreen = tempG[i][j];
+                image[i][j].rgbtBlue = tempB[i][j];
+            }
+        }
+
+        printf("Blur applied!\n");
+    }
+    else if(t_count == 12)
     {
         // create arguments for threads
         PIXELTHREADARGS args[t_count];
@@ -533,6 +654,7 @@ void *blurThreadPixel(void *arg)
     int endH = args->endH;
 
     BYTE(*temp)[width] = args->temp;
+
 
     for (int i = startH; i < endH; i++)
     {
