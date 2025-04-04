@@ -1,50 +1,76 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <mpi.h>
+#include <string.h>
 #include <time.h>
 
+// BMP Header Structures
 #pragma pack(push, 1)
+
 typedef struct {
-    unsigned short bfType;
-    unsigned int bfSize;
-    unsigned short bfReserved1;
-    unsigned short bfReserved2;
-    unsigned int bfOffBits;
+    uint16_t bfType;
+    uint32_t bfSize;
+    uint16_t bfReserved1;
+    uint16_t bfReserved2;
+    uint32_t bfOffBits;
 } BITMAPFILEHEADER;
 
 typedef struct {
-    unsigned int biSize;
-    int biWidth;
-    int biHeight;
-    unsigned short biPlanes;
-    unsigned short biBitCount;
-    unsigned int biCompression;
-    unsigned int biSizeImage;
-    int biXPelsPerMeter;
-    int biYPelsPerMeter;
-    unsigned int biClrUsed;
-    unsigned int biClrImportant;
+    uint32_t biSize;
+    int32_t biWidth;
+    int32_t biHeight;
+    uint16_t biPlanes;
+    uint16_t biBitCount;
+    uint32_t biCompression;
+    uint32_t biSizeImage;
+    int32_t biXPelsPerMeter;
+    int32_t biYPelsPerMeter;
+    uint32_t biClrUsed;
+    uint32_t biClrImportant;
 } BITMAPINFOHEADER;
+
 #pragma pack(pop)
 
-unsigned char *image;
-unsigned char *padded_image;
-int width, height;
-int channels = 3;
-unsigned int row_padded;
+// Apply the kernel with zero padding and overlapping
+void apply_kernel_with_padding(uint8_t* image, uint8_t* output, int width, int height, float* kernel, int kernel_size) {
+    int offset = kernel_size / 2;
 
-float kernel[3][3] = {
-    {1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 9.0f},
-    {1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 9.0f},
-    {1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 9.0f}
-};
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float sum_r = 0.0f;
+            float sum_g = 0.0f;
+            float sum_b = 0.0f;
+
+            for (int ky = 0; ky < kernel_size; ky++) {
+                for (int kx = 0; kx < kernel_size; kx++) {
+                    int pixel_x = x + kx - offset;
+                    int pixel_y = y + ky - offset;
+
+                    // Check bounds, apply zero padding
+                    if (pixel_x >= 0 && pixel_x < width && pixel_y >= 0 && pixel_y < height) {
+                        int idx = (pixel_y * width + pixel_x) * 3;
+                        sum_r += image[idx] * kernel[ky * kernel_size + kx];
+                        sum_g += image[idx + 1] * kernel[ky * kernel_size + kx];
+                        sum_b += image[idx + 2] * kernel[ky * kernel_size + kx];
+                    }
+                }
+            }
+
+            int idx = (y * width + x) * 3;
+            output[idx] = (uint8_t)(sum_r < 0 ? 0 : (sum_r > 255 ? 255 : sum_r));
+            output[idx + 1] = (uint8_t)(sum_g < 0 ? 0 : (sum_g > 255 ? 255 : sum_g));
+            output[idx + 2] = (uint8_t)(sum_b < 0 ? 0 : (sum_b > 255 ? 255 : sum_b));
+        }
+    }
+}
 
 // Function to load BMP image
-int load_bmp(const char *filename) {
-    FILE *file = fopen(filename, "rb");
+int load_bmp(const char* filename, uint8_t** image, int* width, int* height) {
+    FILE* file = fopen(filename, "rb");
     if (!file) {
-        printf("Error: Failed to open BMP file.\n");
-        return 0;
+        printf("Error opening file!\n");
+        return -1;
     }
 
     BITMAPFILEHEADER fileHeader;
@@ -53,202 +79,157 @@ int load_bmp(const char *filename) {
     fread(&fileHeader, sizeof(BITMAPFILEHEADER), 1, file);
     fread(&infoHeader, sizeof(BITMAPINFOHEADER), 1, file);
 
-    width = infoHeader.biWidth;
-    height = infoHeader.biHeight;
+    *width = infoHeader.biWidth;
+    *height = infoHeader.biHeight;
 
-    row_padded = (width * 3 + 3) & (~3);
-
-    image = (unsigned char*)malloc(row_padded * height);
-    padded_image = (unsigned char*)malloc((width + 2) * 3 * (height + 2));
-
-    if (!image || !padded_image) {
-        printf("Error: Failed to allocate memory for image.\n");
-        fclose(file);
-        return 0;
-    }
+    int size = 3 * (*width) * (*height);
+    *image = (uint8_t*)malloc(size);
 
     fseek(file, fileHeader.bfOffBits, SEEK_SET);
-    fread(image, sizeof(unsigned char), row_padded * height, file);
-
+    fread(*image, size, 1, file);
     fclose(file);
-    return 1;
+
+    return 0;
 }
 
 // Function to save BMP image
-void save_bmp(const char *filename) {
-    FILE *file = fopen(filename, "wb");
+int save_bmp(const char* filename, uint8_t* image, int width, int height) {
+    FILE* file = fopen(filename, "wb");
     if (!file) {
-        printf("Error: Failed to save BMP file.\n");
-        return;
+        printf("Error opening file!\n");
+        return -1;
     }
 
-    BITMAPFILEHEADER fileHeader;
-    BITMAPINFOHEADER infoHeader;
+    BITMAPFILEHEADER fileHeader = {0x4D42, 0, 0, 0, 54}; // 'BM' header
+    BITMAPINFOHEADER infoHeader = {40, width, height, 1, 24, 0, 0, 0, 0, 0};
 
-    fileHeader.bfType = 0x4D42;
-    fileHeader.bfSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + row_padded * height;
-    fileHeader.bfReserved1 = fileHeader.bfReserved2 = 0;
-    fileHeader.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-
-    infoHeader.biSize = sizeof(BITMAPINFOHEADER);
-    infoHeader.biWidth = width;
-    infoHeader.biHeight = height;
-    infoHeader.biPlanes = 1;
-    infoHeader.biBitCount = 24;
-    infoHeader.biCompression = 0;
-    infoHeader.biSizeImage = row_padded * height;
-    infoHeader.biXPelsPerMeter = 0;
-    infoHeader.biYPelsPerMeter = 0;
-    infoHeader.biClrUsed = 0;
-    infoHeader.biClrImportant = 0;
+    int size = 3 * width * height;
+    fileHeader.bfSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + size;
+    infoHeader.biSizeImage = size;
 
     fwrite(&fileHeader, sizeof(BITMAPFILEHEADER), 1, file);
     fwrite(&infoHeader, sizeof(BITMAPINFOHEADER), 1, file);
-    fwrite(image, sizeof(unsigned char), row_padded * height, file);
 
+    fwrite(image, size, 1, file);
     fclose(file);
+
+    return 0;
 }
 
-// Apply kernel to each color channel
-void apply_kernel_to_channels(int x, int y, unsigned char *new_pixel_values) {
-    for (int color = 0; color < 3; color++) {
-        float sum = 0.0;
+// Define the kernel (e.g., a 3x3 averaging kernel)
+float kernel[3][3] = {
+    {1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 9.0f},
+    {1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 9.0f},
+    {1.0f / 9.0f, 1.0f / 9.0f, 1.0f / 9.0f}
+};
 
-        // Apply the kernel
-        for (int ky = -1; ky <= 1; ky++) {
-            for (int kx = -1; kx <= 1; kx++) {
-                int ix = x + kx;
-                int iy = y + ky;
-
-                if (ix < 0 || ix >= width) ix = 0;
-                if (iy < 0 || iy >= height) iy = 0;
-
-                int pixel_index = ((iy + 1) * (width + 2) + (ix + 1)) * 3;
-                unsigned char pixel_value = padded_image[pixel_index + color];
-                sum += pixel_value * kernel[ky + 1][kx + 1];
-            }
-        }
-
-        sum = sum < 0 ? 0 : (sum > 255 ? 255 : sum);
-        new_pixel_values[color] = (unsigned char)sum;
-    }
-}
-
-// Zero padding function
-void zero_padding() {
-    for (int y = 0; y < height + 2; y++) {
-        for (int x = 0; x < (width + 2) * 3; x++) {
-            padded_image[y * (width + 2) * 3 + x] = 0;
-        }
-    }
-
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width * 3; x++) {
-            padded_image[(y + 1) * (width + 2) * 3 + (x + 3)] = image[y * row_padded + x];
-        }
-    }
-}
-
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
-
-    if (!load_bmp("lena.bmp")) {
-        MPI_Finalize();
-        return 1;
-    }
-
-    zero_padding();
 
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    printf("%d rank from %d\n", rank, size);
+    const char* input_image = "lena.bmp";
+    const char* output_image = "lenaout.bmp";
+
+    uint8_t* image = NULL;
+    int width, height;
 
     struct timeval  tv1, tv2;
 
-    if(rank == 0) {
-        // Take start time
-        gettimeofday(&tv1, NULL);
-    }
+    printf("Rank %d out of %d\n", rank, size);
 
-    // Divide image rows among processes
-    int rows_per_process = height / size;
-    int remaining_rows = height % size;
-
-    int start_row = rank * rows_per_process + (rank < remaining_rows ? rank : remaining_rows);
-    int end_row = (rank + 1) * rows_per_process + (rank + 1 < remaining_rows ? rank + 1 : remaining_rows);
-
-    int local_rows = end_row - start_row;
-    int local_size = row_padded * local_rows;
-
-    printf("start : %d // end : %d\n", start_row, end_row);
-
-    unsigned char *local_image = (unsigned char*)malloc(local_size * sizeof(unsigned char));
-
-    // Each process applies the kernel to its portion of the image
-    for (int y = start_row; y < end_row; y++) {
-        for (int x = 0; x < width; x++) {
-            unsigned char new_pixel_values[3];
-            apply_kernel_to_channels(x, y, new_pixel_values);
-
-            int pixel_index = (y - start_row) * row_padded + x * 3;
-            local_image[pixel_index + 0] = new_pixel_values[0];
-            local_image[pixel_index + 1] = new_pixel_values[1];
-            local_image[pixel_index + 2] = new_pixel_values[2];
+    // Master process (rank 0) loads the image
+    if (rank == 0) {
+        if (load_bmp(input_image, &image, &width, &height) != 0) {
+            MPI_Abort(MPI_COMM_WORLD, -1);
         }
     }
 
-    if(rank == 0) {
+    // Broadcast image dimensions to all processes
+    MPI_Bcast(&width, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&height, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Calculate the chunk size for each process (divide the height of the image)
+    int chunk_height = height / size;
+    int remainder = height % size;
+
+    // Add overlap to the chunk (2 rows for a 3x3 kernel)
+    int overlap = 6;
+    int start_row = rank * chunk_height + (rank < remainder ? rank : remainder);
+    int end_row = (rank + 1) * chunk_height + (rank + 1 < remainder ? rank + 1 : remainder);
+
+    // Allocate memory for the image chunk with overlap (add one row above and below)
+    uint8_t* chunk = (uint8_t*)malloc(3 * width * (end_row - start_row + (2 * overlap)));
+
+    // Master process sends image chunks to worker processes
+    if (rank == 0) {
+        for (int i = 1; i < size; i++) {
+            int start = i * chunk_height + (i < remainder ? i : remainder) - overlap;
+            int end = (i + 1) * chunk_height + (i + 1 < remainder ? i + 1 : remainder) + overlap;
+
+            // Send chunk with overlap rows
+            MPI_Send(&image[(start * width * 3)], 3 * width * (end - start), MPI_UNSIGNED_CHAR, i, 0, MPI_COMM_WORLD);
+        }
+
+
+
+        // Take start time
+        gettimeofday(&tv1, NULL);
+        //mpiexec -np 18 Project2.exe
+
+        // Process the master chunk with overlap
+        apply_kernel_with_padding(&image[start_row * width * 3], chunk, width, end_row - start_row + overlap, (float*)kernel, 3);
+    } else {
+        // Worker processes receive their image chunk
+        MPI_Recv(chunk, 3 * width * (end_row - start_row + (2 * overlap)), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+
+        // Apply the kernel to the received chunk
+        apply_kernel_with_padding(chunk, chunk, width, end_row - start_row + (2 * overlap), (float*)kernel, 3);
+    }
+
+    // Gather all chunks back to the master node
+    uint8_t* result_image = NULL;
+    if (rank == 0) {
         // Take end time
         gettimeofday(&tv2,NULL);
 
         printf ("Elapsed time = %f seconds\n",
             (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 +
             (double) (tv2.tv_sec - tv1.tv_sec));
-    }
 
-    unsigned char *final_image = NULL;
+        result_image = (uint8_t*)malloc(3 * width * height);
 
-    if (rank == 0) {
-        final_image = (unsigned char*)malloc(row_padded * height);
-    }
-
-    // Gather data using MPI_Gatherv
-    int *recvcounts = NULL;
-    int *displs = NULL;
-
-    if (rank == 0) {
-        recvcounts = (int*)malloc(size * sizeof(int));
-        displs = (int*)malloc(size * sizeof(int));
-
-        int total_size = 0;
-        for (int i = 0; i < size; i++) {
-            int rows = height / size + (i < height % size ? 1 : 0);
-            recvcounts[i] = row_padded * rows;
-            displs[i] = total_size;
-            total_size += recvcounts[i];
+        for(int i = 0; i < 3 * width * height; i++)
+        {
+            result_image[i] = 250;
         }
+
+        memcpy(result_image + (start_row * width * 3), chunk, 3 * width * (end_row - start_row));
+
+        // Gather results from all other processes
+        for (int i = 1; i < size; i++) {
+            int start = i * chunk_height + (i < remainder ? i : remainder);
+            int end = (i + 1) * chunk_height + (i + 1 < remainder ? i + 1 : remainder);
+
+            MPI_Recv(&result_image[start * width * 3], 3 * width * (end - start), MPI_UNSIGNED_CHAR, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        // Save the resulting image
+        save_bmp(output_image, result_image, width, height);
+    } else {
+        // Send the chunk back to the master
+        MPI_Send(chunk + (overlap * 3 * width), 3 * width * (end_row - start_row), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD);
     }
 
-    MPI_Gatherv(local_image, local_size, MPI_UNSIGNED_CHAR,
-                image, recvcounts, displs, MPI_UNSIGNED_CHAR,
-                0, MPI_COMM_WORLD);
-
-    // Root process (rank 0) saves the final image
-    if(rank == 0) {
-        save_bmp("lenaout.bmp");
-    }
-
-    free(local_image);
+    // Clean up
+    free(chunk);
     if (rank == 0) {
-        free(recvcounts);
-        free(displs);
-        free(final_image);
+        free(image);
+        free(result_image);
     }
-
-    free(image);
-    free(padded_image);
 
     MPI_Finalize();
     return 0;
