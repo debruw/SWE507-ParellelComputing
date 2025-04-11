@@ -177,13 +177,7 @@ int main() {
     gettimeofday(&tv1, NULL);
 
     // Parallel processing with OpenMP
-    #pragma omp parallel for collapse(2)
-
-        // Get the thread number (unique for each thread in this parallel region)
-        /*int thread_id = omp_get_thread_num();
-        int total_threads = omp_get_num_threads();
-        printf("Thread %d of %d\n", thread_id, total_threads);
-*/
+    #pragma omp parallel for
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 unsigned char new_pixel_values[3];  // To store the new pixel values for R, G, B
@@ -196,8 +190,11 @@ int main() {
                 image[pixel_index + 2] = new_pixel_values[2];  // Blue
             }
         }
-
-
+        // Get the thread number (unique for each thread in this parallel region)
+        /*int thread_id = omp_get_thread_num();
+        int total_threads = omp_get_num_threads();
+        printf("Thread %d of %d\n", thread_id, total_threads);
+*/
 
     // Stop the timer
     gettimeofday(&tv2, NULL);

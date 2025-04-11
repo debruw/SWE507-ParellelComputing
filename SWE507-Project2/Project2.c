@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
     int chunk_height = height / size;
     int remainder = height % size;
 
-    // Add overlap to the chunk (2 rows for a 3x3 kernel)
+    // Add overlap to the chunk
     int overlap = 6;
     int start_row = rank * chunk_height + (rank < remainder ? rank : remainder);
     int end_row = (rank + 1) * chunk_height + (rank + 1 < remainder ? rank + 1 : remainder);
@@ -164,7 +164,8 @@ int main(int argc, char** argv) {
     uint8_t* chunk = (uint8_t*)malloc(3 * width * (end_row - start_row + (2 * overlap)));
 
     // Master process sends image chunks to worker processes
-    if (rank == 0) {
+    if (rank == 0)
+    {
         for (int i = 1; i < size; i++) {
             int start = i * chunk_height + (i < remainder ? i : remainder) - overlap;
             int end = (i + 1) * chunk_height + (i + 1 < remainder ? i + 1 : remainder) + overlap;
@@ -173,15 +174,14 @@ int main(int argc, char** argv) {
             MPI_Send(&image[(start * width * 3)], 3 * width * (end - start), MPI_UNSIGNED_CHAR, i, 0, MPI_COMM_WORLD);
         }
 
-
-
         // Take start time
         gettimeofday(&tv1, NULL);
         //mpiexec -np 18 Project2.exe
 
         // Process the master chunk with overlap
         apply_kernel_with_padding(&image[start_row * width * 3], chunk, width, end_row - start_row + overlap, (float*)kernel, 3);
-    } else {
+    } else
+    {
         // Worker processes receive their image chunk
         MPI_Recv(chunk, 3 * width * (end_row - start_row + (2 * overlap)), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
@@ -202,10 +202,10 @@ int main(int argc, char** argv) {
 
         result_image = (uint8_t*)malloc(3 * width * height);
 
-        for(int i = 0; i < 3 * width * height; i++)
+        /*for(int i = 0; i < 3 * width * height; i++)
         {
             result_image[i] = 250;
-        }
+        }*/
 
         memcpy(result_image + (start_row * width * 3), chunk, 3 * width * (end_row - start_row));
 
